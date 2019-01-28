@@ -55,6 +55,10 @@ fn run() -> Result<(), Error> {
 
     let git_state = SubCommand::with_name("git-state")
         .about("Show git state of all repos")
+        .arg(Arg::with_name("all")
+                .long("all")
+                .short("a")
+                .help("Show all checked repos"))
         .arg(Arg::with_name("debug")
                 .short("D")
                 .help("print debug information verbosely"));
@@ -75,7 +79,7 @@ fn run() -> Result<(), Error> {
 
 
     if let Some(matches) = matches.subcommand_matches("git-state") {
-        if let Err(e) = cmd_git_state(&repos, matches.is_present("debug")) {
+        if let Err(e) = cmd_git_state(&repos, matches.is_present("all"), matches.is_present("debug")) {
             println!("FAIL: {}", e);
         }
     } else if let Some(_matches) = matches.subcommand_matches("cargo-update") {
@@ -89,7 +93,7 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn cmd_git_state(paths: &[String], _with_debug: bool) -> Result<(), Error> {
+fn cmd_git_state(paths: &[String], all: bool, _with_debug: bool) -> Result<(), Error> {
 
     let term = Terminal {};
 
@@ -123,6 +127,11 @@ fn cmd_git_state(paths: &[String], _with_debug: bool) -> Result<(), Error> {
                     .to_owned();
 
                 let (clr, st) = git_state(&repo)?;
+
+                if !all && st.trim().is_empty() {
+                    continue;
+                }
+
                 term.write(&[
                         &Output::FontColor(clr),
                         &Output::Text(st),
