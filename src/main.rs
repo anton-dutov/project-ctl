@@ -1,5 +1,3 @@
-
-
 use std::{
     fs::File
 };
@@ -69,12 +67,19 @@ fn run() -> Result<(), Error> {
                 .short("D")
                 .help("print debug information verbosely"));
 
+    let cargo_clr = SubCommand::with_name("cargo-clean")
+        .about("Run cargo clean for all cargo repos")
+        .arg(Arg::with_name("debug")
+                .short("D")
+                .help("print debug information verbosely"));
+
     let matches = App::new("Project control")
       .version(env!("CARGO_PKG_VERSION"))
       .author("Anton Dutov <anton.dutov@gmail.com>")
       .about("Project control helper")
       .subcommand(git_state)
       .subcommand(cargo_upd)
+      .subcommand(cargo_clr)
       .get_matches();
 
 
@@ -84,6 +89,10 @@ fn run() -> Result<(), Error> {
         }
     } else if let Some(_matches) = matches.subcommand_matches("cargo-update") {
         if let Err(e) = cmd_cargo_update(&repos, matches.is_present("debug")) {
+            println!("FAIL: {}", e);
+        }
+    } else if let Some(_matches) = matches.subcommand_matches("cargo-clean") {
+        if let Err(e) = cmd_cargo_clean(&repos, matches.is_present("debug")) {
             println!("FAIL: {}", e);
         }
     } else {
@@ -185,6 +194,62 @@ fn cmd_cargo_update(paths: &[String], _with_debug: bool) -> Result<(), Error> {
 
                 let clr = if std::process::Command::new("cargo")
                     .args(&["update"])
+                    .output()
+                    .is_ok() {
+                    Color::Rgb(0, 0xFF, 0)
+                } else {
+                    Color::Rgb(0xFF, 0, 0)
+                };
+                term.write(&[
+                        &Output::FontColor(clr),
+                        &Output::Text(name),
+                    ]
+                ).ok();
+            }
+        }
+    }
+
+    Ok(())
+}
+
+
+fn cmd_cargo_clean(paths: &[String], _with_debug: bool) -> Result<(), Error> {
+
+    let term = Terminal {};
+
+
+    for path in paths {
+
+        println!("===[ {} ]=", path);
+
+        let walker = WalkDir::new(&path).into_iter();
+
+        for entry in  walker {
+
+            let entry = entry?;
+
+            if entry.file_name().to_str() != Some("Cargo.toml") {
+                continue;
+            }
+
+            if let Some(parent) = entry.path().parent() {
+
+                let repo = parent
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_owned();
+
+
+                let name = parent
+                    .strip_prefix(path)?
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_owned();
+
+                nix::unistd::chdir(repo.as_str())?;
+
+                let clr = if std::process::Command::new("cargo")
+                    .args(&["clean"])
                     .output()
                     .is_ok() {
                     Color::Rgb(0, 0xFF, 0)
