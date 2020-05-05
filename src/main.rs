@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
-use clap::{Arg, App, SubCommand};
+use clap::Clap;
 use serde::Deserialize;
 
 static CFG_FILE: &str = "project-ctl.yaml";
@@ -20,6 +20,54 @@ static CFG_FILE: &str = "project-ctl.yaml";
 #[derive(Debug, Deserialize)]
 struct ProjectPath {
     pub path: String
+}
+
+
+/// Project control helper
+#[derive(Clap)]
+#[clap(name = "Project control", version = env!("CARGO_PKG_VERSION"), author = "Anton Dutov <anton.dutov@gmail.com>")]
+struct Opts {
+    #[clap(subcommand)]
+    cmd: Command,
+}
+
+#[derive(Clap)]
+enum Command {
+    #[clap(name = "cargo-update")]
+    CargoUpdate(CargoUpdate),
+
+    #[clap(name = "cargo-clean")]
+    CargoClean(CargoClean),
+
+    #[clap(name = "git-state")]
+    GitState(GitState),
+}
+
+/// Run cargo update for all cargo repos
+#[derive(Clap)]
+struct CargoUpdate {
+    /// print debug information verbosely
+    #[clap(short = "D", long)]
+    debug: bool
+}
+
+/// Run cargo clean for all cargo repos
+#[derive(Clap)]
+struct CargoClean {
+    /// print debug information verbosely
+    #[clap(short = "D", long)]
+    debug: bool
+}
+
+/// Show git state of all repos
+#[derive(Clap)]
+struct GitState {
+    /// Show all checked repos
+    #[clap(short, long)]
+    all: bool,
+    /// print debug information verbosely
+    #[clap(short = "D", long)]
+    debug: bool
 }
 
 
@@ -47,56 +95,27 @@ fn run() -> Result<(), Error> {
 
 
     if repos.is_empty() {
-        Err(format_err!("{}: Path not defined", CFG_FILE))?
+        return Err(format_err!("{}: Path not defined", CFG_FILE))
     }
 
+    let opts: Opts = Opts::parse();
 
-    let git_state = SubCommand::with_name("git-state")
-        .about("Show git state of all repos")
-        .arg(Arg::with_name("all")
-                .long("all")
-                .short("a")
-                .help("Show all checked repos"))
-        .arg(Arg::with_name("debug")
-                .short("D")
-                .help("print debug information verbosely"));
-
-    let cargo_upd = SubCommand::with_name("cargo-update")
-        .about("Run cargo update for all cargo repos")
-        .arg(Arg::with_name("debug")
-                .short("D")
-                .help("print debug information verbosely"));
-
-    let cargo_clr = SubCommand::with_name("cargo-clean")
-        .about("Run cargo clean for all cargo repos")
-        .arg(Arg::with_name("debug")
-                .short("D")
-                .help("print debug information verbosely"));
-
-    let matches = App::new("Project control")
-      .version(env!("CARGO_PKG_VERSION"))
-      .author("Anton Dutov <anton.dutov@gmail.com>")
-      .about("Project control helper")
-      .subcommand(git_state)
-      .subcommand(cargo_upd)
-      .subcommand(cargo_clr)
-      .get_matches();
-
-
-    if let Some(matches) = matches.subcommand_matches("git-state") {
-        if let Err(e) = cmd_git_state(&repos, matches.is_present("all"), matches.is_present("debug")) {
-            println!("FAIL: {}", e);
+    match opts.cmd {
+        Command::CargoClean(o) => {
+            if let Err(e) = cmd_cargo_clean(&repos, o.debug) {
+                println!("FAIL: {}", e);
+            }
         }
-    } else if let Some(_matches) = matches.subcommand_matches("cargo-update") {
-        if let Err(e) = cmd_cargo_update(&repos, matches.is_present("debug")) {
-            println!("FAIL: {}", e);
+        Command::CargoUpdate(o) => {
+            if let Err(e) = cmd_cargo_update(&repos, o.debug) {
+                println!("FAIL: {}", e);
+            }
         }
-    } else if let Some(_matches) = matches.subcommand_matches("cargo-clean") {
-        if let Err(e) = cmd_cargo_clean(&repos, matches.is_present("debug")) {
-            println!("FAIL: {}", e);
+        Command::GitState(o) => {
+            if let Err(e) = cmd_git_state(&repos, o.all, o.debug) {
+                println!("FAIL: {}", e);
+            }
         }
-    } else {
-        println!("Command required, try help");
     }
 
     Ok(())
