@@ -3,8 +3,8 @@ use std::{
 };
 use std::io::Write;
 
-use failure::{
-    Error,
+use anyhow::{
+    Result as Fallible,
     format_err
 };
 
@@ -19,7 +19,13 @@ static CFG_FILE: &str = "project-ctl.yaml";
 
 #[derive(Debug, Deserialize)]
 struct ProjectPath {
-    pub path: String
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Target {
+    path: String,
+    name: String,
 }
 
 
@@ -47,7 +53,7 @@ enum Command {
 #[derive(Clap)]
 struct CargoUpdate {
     /// print debug information verbosely
-    #[clap(short = "D", long)]
+    #[clap(short = 'D', long)]
     debug: bool
 }
 
@@ -55,7 +61,7 @@ struct CargoUpdate {
 #[derive(Clap)]
 struct CargoClean {
     /// print debug information verbosely
-    #[clap(short = "D", long)]
+    #[clap(short = 'D', long)]
     debug: bool
 }
 
@@ -66,7 +72,7 @@ struct GitState {
     #[clap(short, long)]
     all: bool,
     /// print debug information verbosely
-    #[clap(short = "D", long)]
+    #[clap(short = 'D', long)]
     debug: bool
 }
 
@@ -78,7 +84,7 @@ fn main() {
 
 }
 
-fn run() -> Result<(), Error> {
+fn run() -> Fallible<()> {
 
     let mut cfg = dirs::config_dir().ok_or_else(|| {
         format_err!("CONFIG DIR NOT FOUND")
@@ -121,7 +127,7 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn cmd_git_state(paths: &[String], all: bool, _with_debug: bool) -> Result<(), Error> {
+fn cmd_git_state(paths: &[String], all: bool, _with_debug: bool) -> Fallible<()> {
 
     let term = Terminal {};
 
@@ -176,55 +182,38 @@ fn cmd_git_state(paths: &[String], all: bool, _with_debug: bool) -> Result<(), E
 }
 
 
-fn cmd_cargo_update(paths: &[String], _with_debug: bool) -> Result<(), Error> {
+fn cmd_cargo_update(paths: &[String], with_debug: bool) -> Fallible<()> {
 
     let term = Terminal {};
 
 
     for path in paths {
 
-        println!("===[ {} ]=", path);
+        let repos = cargo_projects(&path, with_debug)?;
 
-        let walker = WalkDir::new(&path).into_iter();
+        let total = repos.len();
 
-        for entry in  walker {
+        println!("===[ {} ({}) ]=", path, total);
 
-            let entry = entry?;
+        for (i, target) in repos.iter().enumerate() {
 
-            if entry.file_name().to_str() != Some("Cargo.toml") {
+            if let Err(_e) = nix::unistd::chdir(target.path.as_str()) {
                 continue;
             }
 
-            if let Some(parent) = entry.path().parent() {
-
-                let repo = parent
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_owned();
-
-
-                let name = parent
-                    .strip_prefix(path)?
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_owned();
-
-                nix::unistd::chdir(repo.as_str())?;
-
-                let clr = if std::process::Command::new("cargo")
-                    .args(&["update"])
-                    .output()
-                    .is_ok() {
-                    Color::Rgb(0, 0xFF, 0)
-                } else {
-                    Color::Rgb(0xFF, 0, 0)
-                };
-                term.write(&[
-                        &Output::FontColor(clr),
-                        &Output::Text(name),
-                    ]
-                ).ok();
-            }
+            let clr = if std::process::Command::new("cargo")
+                .args(&["update"])
+                .output()
+                .is_ok() {
+                Color::Rgb(0, 0xFF, 0)
+            } else {
+                Color::Rgb(0xFF, 0, 0)
+            };
+            term.write(&[
+                    &Output::FontColor(clr),
+                    &Output::Text(format!("{:03}/{:03} {}", i, total, target.name)),
+                ]
+            ).ok();
         }
     }
 
@@ -232,62 +221,45 @@ fn cmd_cargo_update(paths: &[String], _with_debug: bool) -> Result<(), Error> {
 }
 
 
-fn cmd_cargo_clean(paths: &[String], _with_debug: bool) -> Result<(), Error> {
+fn cmd_cargo_clean(paths: &[String], with_debug: bool) -> Fallible<()> {
 
     let term = Terminal {};
 
 
     for path in paths {
 
-        println!("===[ {} ]=", path);
+        let repos = cargo_projects(&path, with_debug)?;
 
-        let walker = WalkDir::new(&path).into_iter();
+        let total = repos.len();
 
-        for entry in  walker {
+        println!("===[ {} ({}) ]=", path, total);
 
-            let entry = entry?;
+        for (i, target) in repos.iter().enumerate() {
 
-            if entry.file_name().to_str() != Some("Cargo.toml") {
+            if let Err(_e) = nix::unistd::chdir(target.path.as_str()) {
                 continue;
             }
 
-            if let Some(parent) = entry.path().parent() {
-
-                let repo = parent
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_owned();
-
-
-                let name = parent
-                    .strip_prefix(path)?
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_owned();
-
-                nix::unistd::chdir(repo.as_str())?;
-
-                let clr = if std::process::Command::new("cargo")
-                    .args(&["clean"])
-                    .output()
-                    .is_ok() {
-                    Color::Rgb(0, 0xFF, 0)
-                } else {
-                    Color::Rgb(0xFF, 0, 0)
-                };
-                term.write(&[
-                        &Output::FontColor(clr),
-                        &Output::Text(name),
-                    ]
-                ).ok();
-            }
+            let clr = if std::process::Command::new("cargo")
+                .args(&["clean"])
+                .output()
+                .is_ok() {
+                Color::Rgb(0, 0xFF, 0)
+            } else {
+                Color::Rgb(0xFF, 0, 0)
+            };
+            term.write(&[
+                    &Output::FontColor(clr),
+                    &Output::Text(format!("{:03}/{:03} {}", i, total, target.name)),
+                ]
+            ).ok();
         }
     }
 
     Ok(())
 }
 
-fn git_state(path: &str) -> Result<(Color, String), Error> {
+fn git_state(path: &str) -> Fallible<(Color, String)> {
     nix::unistd::chdir(path)?;
 
     let st1 = std::process::Command::new("git")
@@ -321,14 +293,11 @@ enum Output {
 }
 
 #[derive(Debug)]
-struct Terminal {
-
-
-}
+struct Terminal {}
 
 
 impl Terminal {
-    pub fn write(&self, data: &[&Output]) -> Result<(), Error> {
+    pub fn write(&self, data: &[&Output]) -> Fallible<()> {
 
         let mut stdout = StandardStream::stdout(ColorChoice::Always);
 
@@ -354,4 +323,38 @@ impl Terminal {
 
         Ok(())
     }
+}
+
+
+
+fn cargo_projects(path: &str, _with_debug: bool) -> Fallible<Vec<Target>>{
+
+    let mut result = Vec::new();
+    let iter = WalkDir::new(path)
+        .into_iter()
+        .map(|e| e.unwrap())
+        .filter(|e| e.file_name().to_str() == Some("Cargo.toml"));
+
+    for repo in iter {
+        let parent = if let Some(parent) = repo.path().parent() {
+            parent
+        } else {
+            continue;
+        };
+
+        let repo = parent
+            .to_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        let name = parent
+            .strip_prefix(path)?
+            .to_str()
+            .unwrap_or_default()
+            .to_owned();
+
+        result.push(Target {path: repo, name});
+    }
+
+    Ok(result)
 }
